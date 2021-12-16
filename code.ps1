@@ -57,7 +57,7 @@ $frontendNic1 = New-AzNetworkInterface `
   -ResourceGroupName myRG1 `
   -Location EastUS `
   -Name myFrontend1 `
-  -SubnetId $vnet.Subnets[0].Id `
+  -SubnetId $vnet1.Subnets[0].Id `
   -PublicIpAddressId $pip.Id
 #VM의 관리자 계정에 필요한 사용자 이름 및 암호 설정
 $cred = Get-Credential
@@ -79,7 +79,7 @@ $frontendNic2 = New-AzNetworkInterface `
   -ResourceGroupName myRG2 `
   -Location EastAsia `
   -Name myFrontend2 `
-  -SubnetId $vnet.Subnets[0].Id `
+  -SubnetId $vnet2.Subnets[0].Id `
   -PublicIpAddressId $pip.Id
 #VM의 관리자 계정에 필요한 사용자 이름 및 암호 설정
 $cred = Get-Credential
@@ -171,7 +171,7 @@ $nsgBacken2d = New-AzNetworkSecurityGroup `
 
 #가상 네트워크1 가져오기--------------------------------------
 $vnet1 = Get-AzVirtualNetwork `
-  -ResourceGroupName myRG `
+  -ResourceGroupName myRG1 `
   -Name myVNet1
 
 #프론트엔드, 백엔드 서브넷1 가져오기
@@ -187,7 +187,7 @@ $frontendSubnetConfig1 = Set-AzVirtualNetworkSubnetConfig `
 
 #백엔드 서브넷1에 네트워크 보안 그룹 추가
 $backendSubnetConfig1 = Set-AzVirtualNetworkSubnetConfig `
-  -VirtualNetwork $vnet `
+  -VirtualNetwork $vnet1 `
   -Name myBackendSubnet1 `
   -AddressPrefix $backendSubnet1.AddressPrefix `
   -NetworkSecurityGroup $nsgBackend1
@@ -227,7 +227,7 @@ $backendNic1 = New-AzNetworkInterface `
   -ResourceGroupName myRG1 `
   -Location EastUS `
   -Name myBackend1 `
-  -SubnetId $vnet.Subnets[1].Id
+  -SubnetId $vnet1.Subnets[1].Id
 
 #VM의 관리자 계정에 필요한 사용자 이름 및 암호 설정
 $cred = Get-Credential
@@ -269,7 +269,7 @@ Get-Job
 
 <##### 사용자 지정 스크립트 확장을 사용하여 IIS 설치 #####>
 Set-AzVMExtension `
-  -ResourceGroupName "myRG" `
+  -ResourceGroupName "myRG1" `
   -ExtensionName "IIS" `
   -VMName myFrontend1 `
   -Publisher Microsoft.Compute `
@@ -279,7 +279,7 @@ Set-AzVMExtension `
   -Location EastUS
 
 Set-AzVMExtension `
-  -ResourceGroupName "myRG" `
+  -ResourceGroupName "myRG2" `
   -ExtensionName "IIS" `
   -VMName myFrontend2 `
   -Publisher Microsoft.Compute `
@@ -290,22 +290,22 @@ Set-AzVMExtension `
 
 
 #Pub2 분리
-$nic = Get-AzNetworkInterface -Name myFrontend2 -ResourceGroup myRG
+$nic = Get-AzNetworkInterface -Name myFrontend2 -ResourceGroup myRG2
 $nic.IpConfigurations.publicipaddress.id = $null
 Set-AzNetworkInterface -NetworkInterface $nic
 
 #Pub2 삭제
 Remove-AzPublicIpAddress `
   -Name myPubIP2 `
-	-ResourceGroupName myRG
+	-ResourceGroupName myRG2
 
 <##### 피어링 #####> 
 #가상 네트워크 가져오기
 $VNet1 = Get-AzVirtualNetwork `
-  -ResourceGroupName myRG `
+  -ResourceGroupName myRG1 `
   -Name myVNet1
 $VNet2 = Get-AzVirtualNetwork `
-  -ResourceGroupName myRG `
+  -ResourceGroupName myRG2 `
   -Name myVNet2
 
 #피어링
@@ -320,9 +320,15 @@ Add-AzVirtualNetworkPeering `
 
 #연결 확인
 Get-AzVirtualNetworkPeering `
-  -ResourceGroupName myRG `
+  -ResourceGroupName myRG1 `
   -VirtualNetworkName myVNet1 `
   | Select PeeringState
+
+  Get-AzVirtualNetworkPeering `
+  -ResourceGroupName myRG2 `
+  -VirtualNetworkName myVNet2 `
+  | Select PeeringState
+
 
 #VM 접속해서 Powershell을 사용하여 ping할 수 있도록 방화벽을 통해 ICMP 사용 설정
 #New-NetFirewallRule –DisplayName "Allow ICMPv4-In" –Protocol ICMPv4
@@ -331,28 +337,32 @@ Get-AzVirtualNetworkPeering `
 #ping 10.0.0.4
 
 <##### 배스천 생성 #####>
+$subnetName = "AzureBastionSubnet"
+
 #가상 네트워크 가져오기
 $vnet = Get-AzVirtualNetwork `
-  -ResourceGroupName myRG `
+  -ResourceGroupName myRG1 `
   -Name myVNet1
 
 #가상 네트워크에 배스천 서브넷 추가
 Add-AzVirtualNetworkSubnetConfig `
-  -Name "myBastionSubnet" `
+  -Name $subnetName `
   -AddressPrefix 10.0.2.0/24 `
 	-VirtualNetwork $vnet
 
+Set-AzVirtualNetwork -VirtualNetwork $vnet
+
 #공용 주소 생성
 $publicip = New-AzPublicIpAddress `
-  -ResourceGroupName "myRG" `
-  -name "myPubIP-bastion" `
+  -ResourceGroupName "myRG1" `
+  -name "myPubIP2" `
   -location "East US" `
   -AllocationMethod Static `
   -Sku Standard
 
 #배스천 생성
 $bastion = New-AzBastion `
-  -ResourceGroupName "myRG" `
+  -ResourceGroupName "myRG1" `
   -Name "myBastion" `
   -PublicIpAddress $publicip `
   -VirtualNetwork $vnet
@@ -361,19 +371,21 @@ $bastion = New-AzBastion `
 #NAT 게이트웨이를 위한 공용 주소 생성
 $publicIP = New-AzPublicIpAddress `
   -Name 'myPubIP3' `
-  -ResourceGroupName 'myRG' `
+  -ResourceGroupName 'myRG2' `
   -Location 'EastAsia' `
   -Sku 'Standard' `
   -AllocationMethod 'Static'
 
 #NAT 게이트웨이 생성
 $natGateway = New-AzNatGateway `
-  -ResourceGroupName 'myRG' `
+  -ResourceGroupName 'myRG2' `
   -Name 'myNATGW' `
   -IdleTimeoutInMinutes '10' `
   -Sku 'Standard' `
   -Location 'EastAsia' `
   -PublicIpAddress $publicIP
 
-<##### 모든 리소스 제거 #####>
-Remove-AzResourceGroup -Name myRG
+<##### 모든 리소스 제거
+Remove-AzResourceGroup -Name myRG1
+Remove-AzRecoveryGroup -Name myRG2
+ #####>
