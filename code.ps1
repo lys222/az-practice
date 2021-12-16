@@ -360,12 +360,13 @@ $publicip = New-AzPublicIpAddress `
   -AllocationMethod Static `
   -Sku Standard
 
-#배스천 생성
+<#배스천 생성
 $bastion = New-AzBastion `
   -ResourceGroupName "myRG1" `
   -Name "myBastion" `
   -PublicIpAddress $publicip `
   -VirtualNetwork $vnet
+#>
 
 <##### NAT 게이트웨이 생성 #####>
 #NAT 게이트웨이를 위한 공용 주소 생성
@@ -385,7 +386,9 @@ $natGateway = New-AzNatGateway `
   -Location 'EastAsia' `
   -PublicIpAddress $publicIP
 
+#myPubIP2와 https://whatsmyip.com/의 주소 비교
+
 <##### 모든 리소스 제거
 Remove-AzResourceGroup -Name myRG1
-Remove-AzRecoveryGroup -Name myRG2
+Remove-AzResourceGroup -Name myRG2
  #####>
