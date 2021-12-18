@@ -15,10 +15,10 @@ $frontendSubnet1 = New-AzVirtualNetworkSubnetConfig `
 $backendSubnet1 = New-AzVirtualNetworkSubnetConfig `
   -Name myBackendSubnet1 `
   -AddressPrefix 10.0.1.0/24
-<#애플리케이션 서브넷 설정
+#애플리케이션 서브넷 설정
 $appSubnet = New-AzVirtualNetworkSubnetConfig `
   -Name myAGSubnet `
-  -AddressPrefix 10.0.2.0/24 ` #>
+  -AddressPrefix 10.0.2.0/24 `
 
 #프론트엔드 서브넷2 생성
 $frontendSubnet2 = New-AzVirtualNetworkSubnetConfig `
@@ -36,7 +36,7 @@ $vnet1 = New-AzVirtualNetwork `
   -Location EastUS `
   -Name myVNet1 `
   -AddressPrefix 10.0.0.0/16 `
-  -Subnet $frontendSubnet1, $backendSubnet1 #, $appSubnet
+  -Subnet $frontendSubnet1, $backendSubnet1, $appSubnet
 #가상 네트워크2 생성
 $vnet2 = New-AzVirtualNetwork `
   -ResourceGroupName myRG2 `
@@ -60,7 +60,7 @@ $pip2 = New-AzPublicIpAddress `
   -Name myPubIP2
 
 #애플리케이션 게이트 웨이용 공용 주소 생성
-$pip = New-AzPublicIpAddress `
+$pip3 = New-AzPublicIpAddress `
   -ResourceGroupName myRG1 `
   -Location EastUs `
   -Name myPubIP-AG `
@@ -68,6 +68,11 @@ $pip = New-AzPublicIpAddress `
   -Sku Standard
 
 <##### 애플리케이션 게이트웨이 생성 ----------------------------#####>
+#서브넷 가져오기
+$appSubnet = Get-AzVirtualNetworkSubnetConfig `
+  -Name "myAGSubnet" `
+  -VirtualNetwork $vnet1
+
 #서브넷과 애플리케이션 게이트웨이 연결하는 구성
 $gipconfig = New-AzApplicationGatewayIPConfiguration `
   -Name myAGIPConfig `
@@ -75,14 +80,14 @@ $gipconfig = New-AzApplicationGatewayIPConfiguration `
 #애플리케이션 게이트웨이에 대해 이전에 만든 공용 ip주소를 할당하는 구성
 $fipconfig = New-AzApplicationGatewayFrontendIPConfig `
   -Name myAGFrontendIPConfig `
-  -PublicIPAddress $pip
+  -PublicIPAddress $pip3
 #애플리케이션 게이트웨이에 액세스할 포트 80을 할당
 $frontendport = New-AzApplicationGatewayFrontendPort `
   -Name myFrontendPort `
   -Port 80
 
 #백 엔드 풀 만들기
-  $backendPool = New-AzApplicationGatewayBackendAddressPool `
+$backendPool = New-AzApplicationGatewayBackendAddressPool `
   -Name myAGBackendPool
 #백엔드 풀 설정 구성
 $poolSettings = New-AzApplicationGatewayBackendHttpSetting `
@@ -106,13 +111,13 @@ $frontendRule = New-AzApplicationGatewayRequestRoutingRule `
   -BackendAddressPool $backendPool `
   -BackendHttpSettings $poolSettings
 
-<#애플리케이션 게이트웨이 생성 
+#애플리케이션 게이트웨이 생성 
 $sku = New-AzApplicationGatewaySku `
   -Name Standard_v2 `
   -Tier Standard_v2 `
   -Capacity 2
 New-AzApplicationGateway `
-  -Name myAppGateway `
+  -Name myAGW `
   -ResourceGroupName myRG1 `
   -Location EastUs `
   -BackendAddressPools $backendPool `
@@ -122,24 +127,31 @@ New-AzApplicationGateway `
   -FrontendPorts $frontendport `
   -HttpListeners $defaultlistener `
   -RequestRoutingRules $frontendRule `
-  -Sku $sku
-#>
-  
+  -Sku $sku `
+  -AsJob
+Get-Job
+
 <##### 프론트엔드 VM 만들기 -----------------------------------#####>
+$backendPool = Get-AzApplicationGateway `
+  -Name "myAGW" `
+  -ResourceGroupName myRG1
+
 #프론트엔드 가상 네트워크 인터페이스1 생성
 $frontendNic1 = New-AzNetworkInterface `
   -ResourceGroupName myRG1 `
   -Location EastUS `
-  -Name myFNIC1 `
+  -Name myFrontend1 `
   -SubnetId $vnet1.Subnets[0].Id `
-  -PublicIpAddressId $pip1.Id 
-#  -ApplicationGatewayBackendAddressPool $backendpool
+  -PublicIpAddressId $pip1.Id `
+  -ApplicationGatewayBackendAddressPool $backendpool
+
 #VM의 관리자 계정에 필요한 사용자 이름 및 암호 설정
 $cred = Get-Credential
+
 #프론트엔드 VM1 생성
 New-AzVM `
    -Credential $cred `
-   -Name myFVM1 `
+   -Name myFrontend1 `
    -PublicIpAddressName myPubIP1 `
    -ResourceGroupName myRG1 `
    -Location "EastUS" `
@@ -153,15 +165,17 @@ Get-Job
 $frontendNic2 = New-AzNetworkInterface `
   -ResourceGroupName myRG2 `
   -Location EastAsia `
-  -Name myFNIC2 `
+  -Name myFrontend2 `
   -SubnetId $vnet2.Subnets[0].Id `
   -PublicIpAddressId $pip2.Id
+
 #VM의 관리자 계정에 필요한 사용자 이름 및 암호 설정
 $cred = Get-Credential
+
 #프론트엔드 VM2 생성
 New-AzVM `
    -Credential $cred `
-   -Name myFVM2 `
+   -Name myFrontend2 `
    -PublicIpAddressName myPubIP2 `
    -ResourceGroupName myRG2 `
    -Location "EastAsia" `
@@ -301,7 +315,7 @@ Set-AzVirtualNetwork -VirtualNetwork $vnet2
 $backendNic1 = New-AzNetworkInterface `
   -ResourceGroupName myRG1 `
   -Location EastUS `
-  -Name myBNIC1 `
+  -Name myBackend1 `
   -SubnetId $vnet1.Subnets[1].Id
 
 #VM의 관리자 계정에 필요한 사용자 이름 및 암호 설정
@@ -310,7 +324,7 @@ $cred = Get-Credential
 #백엔드 VM1 생성
 New-AzVM `
    -Credential $cred `
-   -Name myBVM1 `
+   -Name myBackend1 `
    -ImageName "MicrosoftSQLServer:SQL2016SP1-WS2016:Enterprise:latest" `
    -ResourceGroupName myRG1 `
    -Location "EastUS" `
@@ -333,7 +347,7 @@ $cred = Get-Credential
 #백엔드 VM2 생성
 New-AzVM `
    -Credential $cred `
-   -Name myBVM2 `
+   -Name myBackend2 `
    -ImageName "MicrosoftSQLServer:SQL2016SP1-WS2016:Enterprise:latest" `
    -ResourceGroupName myRG2 `
    -Location "EastAsia" `
@@ -347,7 +361,7 @@ Get-Job
 Set-AzVMExtension `
   -ResourceGroupName "myRG1" `
   -ExtensionName "IIS" `
-  -VMName myFVM1 `
+  -VMName myFrontend1 `
   -Publisher Microsoft.Compute `
   -ExtensionType CustomScriptExtension `
   -TypeHandlerVersion 1.8 `
@@ -357,7 +371,7 @@ Set-AzVMExtension `
 Set-AzVMExtension `
   -ResourceGroupName "myRG2" `
   -ExtensionName "IIS" `
-  -VMName myFVM2 `
+  -VMName myFrontend2 `
   -Publisher Microsoft.Compute `
   -ExtensionType CustomScriptExtension `
   -TypeHandlerVersion 1.8 `
@@ -366,7 +380,7 @@ Set-AzVMExtension `
 
 
 #Pub2 분리
-$nic = Get-AzNetworkInterface -Name myFVM2 -ResourceGroup myRG2
+$nic = Get-AzNetworkInterface -Name myFrontend2 -ResourceGroup myRG2
 $nic.IpConfigurations.publicipaddress.id = $null
 Set-AzNetworkInterface -NetworkInterface $nic
 
@@ -436,13 +450,19 @@ $publicip = New-AzPublicIpAddress `
   -AllocationMethod Static `
   -Sku Standard
 
-<#배스천 생성
+#가상 네트워크 가져오기
+$vnet = Get-AzVirtualNetwork `
+  -ResourceGroupName myRG2 `
+  -Name myVNet2
+
+#배스천 생성
 $bastion = New-AzBastion `
   -ResourceGroupName "myRG1" `
   -Name "myBastion" `
   -PublicIpAddress $publicip `
-  -VirtualNetwork $vnet
-#>
+  -VirtualNetwork $vnet`
+  -AsJob
+Get-Job
 
 <##### NAT 게이트웨이 생성 ---------------------------------------#####>
 #NAT 게이트웨이를 위한 공용 주소 생성
@@ -496,11 +516,18 @@ Add-AzVirtualNetworkSubnetConfig `
 	-VirtualNetwork $vnet1
 Add-AzVirtualNetworkSubnetConfig `
   -Name $subnetName `
-  -AddressPrefix 10.0.3.0/24 `
+  -AddressPrefix 20.0.3.0/24 `
 	-VirtualNetwork $vnet2
 
 Set-AzVirtualNetwork -VirtualNetwork $vnet1
 Set-AzVirtualNetwork -VirtualNetwork $vnet2
+
+$subnet1 = Get-AzVirtualNetworkSubnetConfig `
+  -Name "GatewaySubnet" `
+  -VirtualNetwork $vnet1
+$subnet2 = Get-AzVirtualNetworkSubnetConfig `
+  -Name "GatewaySubnet" `
+  -VirtualNetwork $vnet2
 
 #게이트웨이 구성 만들기
 $gwipconf1 = New-AzVirtualNetworkGatewayIpConfig `
@@ -512,6 +539,14 @@ $gwipconf2 = New-AzVirtualNetworkGatewayIpConfig `
   -Subnet $subnet2 `
   -PublicIpAddress $gwpip2
 
+#가상 네트워크 가져오기
+$vnet1 = Get-AzVirtualNetwork `
+  -ResourceGroupName myRG1 `
+  -Name myVNet1
+$vnet2 = Get-AzVirtualNetwork `
+  -ResourceGroupName myRG2 `
+  -Name myVNet2
+
 #게이트웨이 생성
 $vnet1gw = New-AzVirtualNetworkGateway `
   -Name myVNetGW1 `
@@ -520,7 +555,9 @@ $vnet1gw = New-AzVirtualNetworkGateway `
   -IpConfigurations $gwipconf1 `
   -GatewayType Vpn `
   -VpnType RouteBased `
-  -GatewaySku VpnGw1
+  -GatewaySku VpnGw1 `
+  -AsJob
+Get-Job
 $vnet2gw = New-AzVirtualNetworkGateway `
   -Name myVNetGW2 `
   -ResourceGroupName myRG2 `
@@ -528,7 +565,9 @@ $vnet2gw = New-AzVirtualNetworkGateway `
   -IpConfigurations $gwipconf2 `
   -GatewayType Vpn `
   -VpnType RouteBased `
-  -GatewaySku VpnGw1
+  -GatewaySku VpnGw1`
+  -AsJob
+Get-Job
 
 #연결 생성
 New-AzVirtualNetworkGatewayConnection `
@@ -538,8 +577,9 @@ New-AzVirtualNetworkGatewayConnection `
   -VirtualNetworkGateway2 $vnet2gw `
   -Location EastUS `
   -ConnectionType Vnet2Vnet `
-  -SharedKey 'AzureA1b2C3'
-
+  -SharedKey 'AzureA1b2C3' `
+  -AsJob
+Get-Job
 New-AzVirtualNetworkGatewayConnection `
   -Name myConnection2to1 `
   -ResourceGroupName myRG2 `
@@ -547,11 +587,16 @@ New-AzVirtualNetworkGatewayConnection `
   -VirtualNetworkGateway2 $vnet1gw `
   -Location EastAsia `
   -ConnectionType Vnet2Vnet `
-  -SharedKey 'AzureA1b2C3'
+  -SharedKey 'AzureA1b2C3'`
+  -AsJob
 
 #연결 확인
-Get-AzVirtualNetworkGatewayConnection -Name VNet1to2 -ResourceGroupName myRG1
-Get-AzVirtualNetworkGatewayConnection -Name VNet2to1 -ResourceGroupName myRG2
+Get-AzVirtualNetworkGatewayConnection `
+  -Name myConnection1to2 `
+  -ResourceGroupName myRG1 
+Get-AzVirtualNetworkGatewayConnection `
+  -Name myConnection2to1 `
+  -ResourceGroupName myRG2
 
 <##### 모든 리소스 제거 ---------------------------------------
 Remove-AzResourceGroup -Name myRG1
